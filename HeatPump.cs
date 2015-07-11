@@ -108,16 +108,16 @@ namespace RealFuels
 
 		static string FormatFlux(double flux)
 		{
-			if (flux >= 1000000000000.0)
-				return (flux / 1000000000000.0).ToString("F2") + " TW";
-			else if (flux >= 1000000000.0)
-				return (flux / 1000000000.0).ToString("F2") + " GW";
+			if (flux >= 1000000000.0)
+				return (flux / 1000000000.0).ToString("F2") + " TW";
 			else if (flux >= 1000000.0)
-				return (flux / 1000000.0).ToString("F2") + " MW";
+				return (flux / 1000000.0).ToString("F2") + " GW";
 			else if (flux >= 1000.0)
-				return (flux / 1000.0).ToString("F2") + " kW";
+				return (flux / 1000.0).ToString("F2") + " MW";
+			else if (flux >= 1.0)
+				return (flux).ToString("F2") + " kW";
 			else
-				return flux.ToString("F2") + " W";
+				return (flux * 1000.0).ToString("F2") + " W";
 			
 		}
 

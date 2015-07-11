@@ -87,16 +87,10 @@ namespace RealFuels
 		public bool isActive = false;
 		
 		[KSPField(isPersistant = false)]
-		public double heatTransfer = 1.0;
-
-		// TODO consider deprecation as field no longer in use
-		[KSPField(isPersistant = false)]
-		public float heatGain = 1.0f;
+		public double heatTransfer = 0.0;
 
 		[KSPField()]
-		public double heatConductivity = 0.00001;
-
-
+		public double heatConductivity = 0.12;
 
 		[KSPField()]
 		public bool legacy = false;
@@ -241,6 +235,9 @@ namespace RealFuels
 			double requested = 0d;
 			double efficiency = 1d;
 			double _heatTransfer = heatTransfer;
+
+			if (legacy)
+				_heatTransfer *= (targetPart.temperature + 546.15) / (targetPart.temperature + 573.15);
 
 			if (targetPart.thermalConductionFlux + targetPart.skinToInternalFlux > 0.0)
 				_heatTransfer += (targetPart.thermalConductionFlux + targetPart.skinToInternalFlux);

@@ -232,6 +232,8 @@ namespace RealFuels
 				ProcessCooling(part.srfAttachNode.attachedPart);
 			heatTransferDisplay = FormatFlux (part.thermalInternalFlux);
 			part.skinTemperature += (part.thermalInternalFlux * part.skinThermalMassRecip * TimeWarp.fixedDeltaTime);
+			// TODO Kludgy way to see how much heat is being processed. Will fix it properly later
+			part.thermalInternalFlux = 0.0;
 		}
 		
 		public void ProcessCooling(Part targetPart)

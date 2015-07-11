@@ -13,7 +13,8 @@ namespace RealFuels
 		public class ResourceRate
 		{
 			public string name;
-			public float rate;
+			public string unitName;
+			public double rate;
 			public int id
 			{
 				get 
@@ -21,14 +22,21 @@ namespace RealFuels
 					return name.GetHashCode ();
 				}
 			}
-			public ResourceRate(string name, float rate)
+			public ResourceRate(string name, double rate, string unitName)
 			{
 				this.name = name;
 				this.rate = rate;
+				this.unitName = unitName;
 			}
 			
 		}
-		
+
+		[KSPField(isPersistant = false, guiActive = true, guiName = "Efficiency", guiUnits = "",   guiFormat = "")]
+		public string efficiencyDisplay = "100";
+
+		[KSPField(isPersistant = false, guiActive = true, guiName = "Heat Transfer", guiUnits = "",   guiFormat = "")]
+		private string heatTransferDisplay = "0 W";
+
 		[KSPAction ("Activate Heat Pump")]
 		public void ActivateAction (KSPActionParam param)
 		{
@@ -79,28 +87,53 @@ namespace RealFuels
 		public bool isActive = false;
 		
 		[KSPField(isPersistant = false)]
-		public float heatTransfer = 1.0f;
-		
+		public double heatTransfer = 1.0;
+
+		// TODO consider deprecation as field no longer in use
 		[KSPField(isPersistant = false)]
-		public float heatGain = 0.0f;
-		
+		public float heatGain = 1.0f;
+
+		[KSPField()]
+		public double heatConductivity = 0.00001;
+
+
+
+		[KSPField()]
+		public bool legacy = false;
+
 		public List<ResourceRate> resources;
 		
 		public List<AttachNode> attachNodes = new List<AttachNode>();
 		public List<string> attachNodeNames = new List<string>(); 
-		
+
+		static string FormatFlux(double flux)
+		{
+			if (flux >= 1000000000000.0)
+				return (flux / 1000000000000.0).ToString("F2") + " TW";
+			else if (flux >= 1000000000.0)
+				return (flux / 1000000000.0).ToString("F2") + " GW";
+			else if (flux >= 1000000.0)
+				return (flux / 1000000.0).ToString("F2") + " MW";
+			else if (flux >= 1000.0)
+				return (flux / 1000.0).ToString("F2") + " kW";
+			else
+				return flux.ToString("F2") + " W";
+			
+		}
+
 		public override string GetInfo ()
 		{
 			string s;
-			s = "Heat Pump: " + heatTransfer + "/s\nRequirements:\n";
+			s = "Heat Pump: " + heatTransfer + " kW\nRequirements:\n";
 			foreach (ResourceRate resource in resources)
 			{
-				if(resource.rate > 1)
-					s += "  " + resource.name + ": " + resource.rate.ToString ("F2") + "/s\n";
-				else if(resource.rate > 0.01666667f)
-					s += "  " + resource.name + ": " + (resource.rate * 60).ToString ("F2") + "/m\n";
+				double _rate = resource.rate * heatTransfer;
+				if(_rate > 1)
+					s += "  " + resource.name + ": " + _rate.ToString ("F2") + " " + resource.unitName + "/s\n";
+				else if(_rate > 0.01666667f)
+					s += "  " + resource.name + ": " + (_rate * 60).ToString ("F2") + " " + resource.unitName + "/m\n";
 				else
-					s += "  " + resource.name + ": " + (resource.rate * 3600).ToString ("F2") + "/h\n";
+					s += "  " + resource.name + ": " + (_rate * 3600).ToString ("F2") + " " + resource.unitName + "/h\n";
 			}
 			
 			return s;
@@ -120,20 +153,25 @@ namespace RealFuels
 			{
 				if(n.HasValue ("name") && n.HasValue ("rate")) 
 				{
-					float rate;
-					float.TryParse (n.GetValue ("rate"), out rate);
-					resources.Add (new ResourceRate(n.GetValue("name"), rate));
+					double rate;
+					string unitName = "";
+					if (n.HasValue ("unitName"))
+						unitName = n.GetValue ("unitName");
+					else
+						unitName = n.GetValue("name");
+					double.TryParse (n.GetValue ("rate"), out rate);
+
+					resources.Add (new ResourceRate(n.GetValue("name"), rate, unitName));
+					print ("adding RESOURCE " + n.GetValue("name") + " = " + rate.ToString());
 				}
 			}
 			foreach (ConfigNode c in node.GetNodes("HEATPUMP_NODE"))
 			{
-				// It would be easier to do this by just reading multiple names from one node
-				// Doing it this way allows for expansion later such as other attributes in each HEATPUMP_NODE
-				print("*RF* Heatpump searching HEATPUMP_NODE");
+				print("searching HEATPUMP_NODE");
 				if (c.HasValue("name"))
 				{
 					string nodeName = c.GetValue("name");
-					print("*RF* Heatpump adding " + nodeName);
+					print("adding " + nodeName);
 					attachNodeNames.Add(nodeName);
 				}
 				
@@ -142,26 +180,36 @@ namespace RealFuels
 		}
 		
 		public override void OnStart (StartState state)
-		{
+		{	
 			base.OnStart (state);
 
-			Events ["Shutdown"].active = false;
-			Events ["Activate"].active = true;
+			Events ["Shutdown"].active = isActive;
+			Events ["Activate"].active = !isActive;
 			
 			if(resources.Count == 0 && part.partInfo != null) 
 			{
-				if(part.partInfo.partPrefab.Modules.Contains ("ModuleHeatPump"))
+				//if(part.partInfo.partPrefab.Modules.Contains ("ModuleHeatPump")) // derrrrr why do I have to check if this contains ModuleHeatPump?
 					resources = ((ModuleHeatPump) part.partInfo.partPrefab.Modules["ModuleHeatPump"]).resources;
 			}
 			if (attachNodes.Count == 0)
 			{
 				foreach (string nodeName in attachNodeNames)
 				{
-					AttachNode node = this.part.findAttachNode(nodeName);
+					AttachNode node = part.findAttachNode(nodeName);
 					if ((object)node != null)
+					{
+						print ("Found AttachNode: " + nodeName);
 						attachNodes.Add(node);
+						if ((object)node.attachedPart != null)
+						{
+							print ("Found attached part: " + node.attachedPart.name);
+							node.attachedPart.heatConductivity = heatConductivity;
+						}
+					}
 				}
 			}
+			if ((object)part.srfAttachNode.attachedPart != null)
+				part.srfAttachNode.attachedPart.heatConductivity = heatConductivity;	
 		}
 		
 		void FixedUpdate()
@@ -180,32 +228,40 @@ namespace RealFuels
 				
 				ProcessCooling(targetPart);
 			}
-			ProcessCooling(this.part.parent);
+			if (part.srfAttachNode.attachedPart != null)
+				ProcessCooling(part.srfAttachNode.attachedPart);
+			heatTransferDisplay = FormatFlux (part.thermalInternalFlux);
+			part.skinTemperature += (part.thermalInternalFlux * part.skinThermalMassRecip * TimeWarp.fixedDeltaTime);
 		}
 		
 		public void ProcessCooling(Part targetPart)
 		{
-			double efficiency = (targetPart.temperature + 546.15) / (targetPart.temperature + 573.15);
-			if (targetPart.temperature < 0)
-				efficiency = 0;
-			if (heatTransfer < 0) 
-			{
-				efficiency = (part.temperature + 546.15) / (part.temperature + 573.15);
-				if(part.temperature < 0)
-					efficiency = 0;
-			}
+			double requested = 0d;
+			double efficiency = 1d;
+			double _heatTransfer = heatTransfer;
+
+			if (targetPart.thermalConductionFlux + targetPart.skinToInternalFlux > 0.0)
+				_heatTransfer += (targetPart.thermalConductionFlux + targetPart.skinToInternalFlux);
+
 			foreach (ResourceRate resource in resources)
 			{
 				if(resource.rate > 0)
 				{
-					float available = part.RequestResource(resource.id, resource.rate);
-					if(efficiency > available / resource.rate)
-						efficiency = available / resource.rate;
+					requested = resource.rate * _heatTransfer * TimeWarp.fixedDeltaTime;
+					double available = part.RequestResource(resource.id, requested);
+					if(efficiency > available / requested)
+						efficiency = available / requested;
 				}
 			}
+			efficiencyDisplay = (efficiency).ToString ("P");
+
 			// Uses KSP 1.0 InternalHeatFlux now
-			targetPart.AddThermalFlux(efficiency * heatTransfer * Time.fixedDeltaTime);
-			part.AddThermalFlux (efficiency * heatTransfer * Time.fixedDeltaTime);
+			targetPart.AddThermalFlux(-_heatTransfer * efficiency);
+			part.AddThermalFlux (_heatTransfer * efficiency);
+		}
+		static void print(string msg)
+		{
+			MonoBehaviour.print("[HeatPump] " + msg);
 		}
 	}
 }

@@ -30,7 +30,7 @@ namespace RealFuels
 			}
 			
 		}
-
+		
 		[KSPField(isPersistant = false, guiActive = true, guiName = "Efficiency", guiUnits = "",   guiFormat = "")]
 		public string efficiencyDisplay = "100";
 
@@ -40,18 +40,24 @@ namespace RealFuels
 		[KSPAction ("Activate Heat Pump")]
 		public void ActivateAction (KSPActionParam param)
 		{
+			if ((object)moduleDeployableRadiator != null)
+				return;
 			Activate ();
 		}
 		
 		[KSPAction ("Shutdown Heat Pump")]
 		public void ShutdownAction (KSPActionParam param)
 		{
+			if ((object)moduleDeployableRadiator != null)
+				return;
 			Shutdown ();
 		}
 		
 		[KSPAction ("Toggle Heat Pump")]
 		public void ToggleAction (KSPActionParam param)
 		{
+			if ((object)moduleDeployableRadiator != null)
+				return;
 			if(isActive)
 				Shutdown ();
 			else
@@ -61,6 +67,8 @@ namespace RealFuels
 		[KSPEvent(guiName = "Activate Heat Pump", guiActive = true)]
 		public void Activate ()
 		{
+			if ((object)moduleDeployableRadiator != null)
+				return;
 			isActive = true;
 			Events ["Shutdown"].active = true;
 			Events ["Activate"].active = false;
@@ -71,12 +79,17 @@ namespace RealFuels
 		[KSPEvent(guiName = "Shutdown Heat Pump", guiActive = true)]
 		public void Shutdown ()
 		{
+			if ((object)moduleDeployableRadiator != null)
+				return;
 			isActive = false;
 			Events ["Shutdown"].active = false;
 			Events ["Activate"].active = true;
 			//Events ["Shutdown"].guiActive = false;
 			//Events ["Activate"].guiActive = true;
 		}
+		[KSPField()]
+		public double radiatorMaxTempCap = 0.8;
+
 		[KSPField]
 		public bool useAnimationState = false;
 
@@ -98,7 +111,20 @@ namespace RealFuels
 		public List<ResourceRate> resources;
 		
 		public List<AttachNode> attachNodes = new List<AttachNode>();
-		public List<string> attachNodeNames = new List<string>(); 
+		public List<string> attachNodeNames = new List<string>();
+
+		private ModuleDeployableRadiator moduleDeployableRadiator;
+
+		public bool IsActive
+		{
+			get
+			{
+				if((object)moduleDeployableRadiator != null)
+					return moduleDeployableRadiator.panelState == ModuleDeployableRadiator.panelStates.EXTENDED;
+				else
+					return isActive;
+			}
+		}
 
 		static string FormatFlux(double flux)
 		{
@@ -177,9 +203,21 @@ namespace RealFuels
 		{	
 			base.OnStart (state);
 
-			Events ["Shutdown"].active = isActive;
-			Events ["Activate"].active = !isActive;
-			
+			moduleDeployableRadiator = part.FindModuleImplementing<ModuleDeployableRadiator> ();
+
+			if ((object)moduleDeployableRadiator == null)
+			{
+				Events ["Shutdown"].active = isActive;
+				Events ["Activate"].active = !isActive;
+			}
+			else
+			{
+				Events ["Shutdown"].active = false;
+				Events ["Activate"].active = false;
+				Actions["ToggleAction"].active = false;
+				Actions["ActivateAction"].active = false;
+				Actions["ShutdownAction"].active = false;
+			}
 			if(resources.Count == 0 && part.partInfo != null) 
 			{
 				//if(part.partInfo.partPrefab.Modules.Contains ("ModuleHeatPump")) // derrrrr why do I have to check if this contains ModuleHeatPump?
@@ -208,8 +246,10 @@ namespace RealFuels
 		
 		void FixedUpdate()
 		{
-			if (!HighLogic.LoadedSceneIsFlight || !isActive)
+			if (!HighLogic.LoadedSceneIsFlight || !IsActive)
 			{
+				efficiencyDisplay = "0%";
+				heatTransferDisplay = "0 W";
 				return;
 			}
 			
@@ -232,21 +272,26 @@ namespace RealFuels
 		
 		public void ProcessCooling(Part targetPart)
 		{
+			if (part.temperature >= part.maxTemp * radiatorMaxTempCap || part.skinTemperature >= part.skinMaxTemp * radiatorMaxTempCap)
+				return;
+
 			double requested = 0d;
 			double efficiency = 1d;
 			double _heatTransfer = heatTransfer;
+			double conductionCompensation = 0d;
 
 			if (legacy)
-				_heatTransfer *= (targetPart.temperature + 546.15) / (targetPart.temperature + 573.15);
+				_heatTransfer *= (targetPart.temperature) / (targetPart.temperature + 27);
 
 			if (targetPart.thermalConductionFlux + targetPart.skinToInternalFlux > 0.0)
-				_heatTransfer += (targetPart.thermalConductionFlux + targetPart.skinToInternalFlux);
+				conductionCompensation  = (targetPart.thermalConductionFlux + targetPart.skinToInternalFlux);
 
 			foreach (ResourceRate resource in resources)
 			{
 				if(resource.rate > 0)
 				{
-					requested = resource.rate * _heatTransfer * TimeWarp.fixedDeltaTime;
+					requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / PhysicsGlobals.ConductionFactor); // Because it gets WAY too expensive compensating for inflated conduction factors.
+					requested *= TimeWarp.fixedDeltaTime;
 					double available = part.RequestResource(resource.id, requested);
 					if(efficiency > available / requested)
 						efficiency = available / requested;

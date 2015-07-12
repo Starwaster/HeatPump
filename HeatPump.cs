@@ -6,7 +6,7 @@ using System.Reflection;
 using UnityEngine;
 using KSP;
 
-namespace RealFuels
+namespace HeatPumps
 {
 	public class ModuleHeatPump: PartModule
 	{

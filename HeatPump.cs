@@ -300,8 +300,8 @@ namespace HeatPumps
 			efficiencyDisplay = (efficiency).ToString ("P");
 
 			// Uses KSP 1.0 InternalHeatFlux now
-			targetPart.AddThermalFlux(-_heatTransfer * efficiency);
-			part.AddThermalFlux (_heatTransfer * efficiency);
+			targetPart.AddThermalFlux(-(_heatTransfer + conductionCompensation) * efficiency);
+			part.AddThermalFlux ((_heatTransfer + conductionCompensation) * efficiency);
 		}
 		static void print(string msg)
 		{

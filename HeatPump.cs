@@ -235,13 +235,17 @@ namespace HeatPumps
 						if ((object)node.attachedPart != null)
 						{
 							print ("Found attached part: " + node.attachedPart.name);
-							node.attachedPart.heatConductivity = heatConductivity;
+							node.attachedPart.heatConductivity = Math.Min (heatConductivity, node.attachedPart.heatConductivity);
+							node.attachedPart.skinInternalConductionMult = Math.Min (heatConductivity, node.attachedPart.skinInternalConductionMult);
 						}
 					}
 				}
 			}
 			if ((object)part.srfAttachNode.attachedPart != null)
-				part.srfAttachNode.attachedPart.heatConductivity = heatConductivity;	
+			{
+				part.srfAttachNode.attachedPart.heatConductivity = Math.Min (heatConductivity, part.srfAttachNode.attachedPart.skinInternalConductionMult);	
+				part.srfAttachNode.attachedPart.heatConductivity = Math.Min (heatConductivity, part.srfAttachNode.attachedPart.heatConductivity);
+			}
 		}
 		
 		void FixedUpdate()

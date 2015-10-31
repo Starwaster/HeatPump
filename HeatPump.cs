@@ -90,6 +90,7 @@ namespace HeatPumps
 		[KSPField()]
 		public double radiatorMaxTempCap = 0.8;
 
+		// TODO Deprecate this; would have performed function now performed by ModuleDeployableRadiator
 		[KSPField]
 		public bool useAnimationState = false;
 
@@ -100,20 +101,26 @@ namespace HeatPumps
 		public bool isActive = false;
 		
 		[KSPField(isPersistant = false)]
-		public double heatTransfer = 0.0;
+		public double heatTransfer = 0.1;
+
+		[KSPField()]
+		public double heatTransferCap = 1.0;
 
 		[KSPField()]
 		public double heatConductivity = 0.12;
 
 		[KSPField()]
-		public bool legacy = false;
-
+		public double skinInternalConductionMult = 0.001;
+		
 		public List<ResourceRate> resources;
 		
 		public List<AttachNode> attachNodes = new List<AttachNode>();
 		public List<string> attachNodeNames = new List<string>();
 
 		private ModuleDeployableRadiator moduleDeployableRadiator;
+		private double capTemp;
+		private double skinCapTemp;
+		private int radiatorCount;
 
 		public bool IsActive
 		{
@@ -203,7 +210,13 @@ namespace HeatPumps
 		{	
 			base.OnStart (state);
 
+			skinCapTemp = part.skinMaxTemp * radiatorMaxTempCap;
+			capTemp = part.maxTemp * radiatorMaxTempCap;
+
 			moduleDeployableRadiator = part.FindModuleImplementing<ModuleDeployableRadiator> ();
+			radiatorCount = part.symmetryCounterparts.Count + 1;
+
+			GameEvents.onVesselWasModified.Add (OnVesselWasModified);
 
 			if ((object)moduleDeployableRadiator == null)
 			{
@@ -220,8 +233,7 @@ namespace HeatPumps
 			}
 			if(resources.Count == 0 && part.partInfo != null) 
 			{
-				//if(part.partInfo.partPrefab.Modules.Contains ("ModuleHeatPump")) // derrrrr why do I have to check if this contains ModuleHeatPump?
-					resources = ((ModuleHeatPump) part.partInfo.partPrefab.Modules["ModuleHeatPump"]).resources;
+				resources = ((ModuleHeatPump) part.partInfo.partPrefab.Modules["ModuleHeatPump"]).resources;
 			}
 			if (attachNodes.Count == 0)
 			{
@@ -236,16 +248,22 @@ namespace HeatPumps
 						{
 							print ("Found attached part: " + node.attachedPart.name);
 							node.attachedPart.heatConductivity = Math.Min (heatConductivity, node.attachedPart.heatConductivity);
-							node.attachedPart.skinInternalConductionMult = Math.Min (heatConductivity, node.attachedPart.skinInternalConductionMult);
+							node.attachedPart.skinInternalConductionMult = Math.Min (skinInternalConductionMult, node.attachedPart.skinInternalConductionMult);
 						}
 					}
 				}
 			}
 			if ((object)part.srfAttachNode.attachedPart != null)
 			{
-				part.srfAttachNode.attachedPart.heatConductivity = Math.Min (heatConductivity, part.srfAttachNode.attachedPart.skinInternalConductionMult);	
 				part.srfAttachNode.attachedPart.heatConductivity = Math.Min (heatConductivity, part.srfAttachNode.attachedPart.heatConductivity);
+				part.srfAttachNode.attachedPart.skinInternalConductionMult = Math.Min (skinInternalConductionMult, part.srfAttachNode.attachedPart.skinInternalConductionMult);	
 			}
+		}
+
+		public void OnVesselWasModified(Vessel v)
+		{
+			if (v == part.vessel)
+				radiatorCount = part.symmetryCounterparts.Count + 1;
 		}
 		
 		void FixedUpdate()
@@ -256,7 +274,7 @@ namespace HeatPumps
 				heatTransferDisplay = "0 W";
 				return;
 			}
-			
+			print("FixedUpdate() Time - " + Time.time.ToString("F4") + " / " + TimeWarp.fixedDeltaTime.ToString("F4"));
 			foreach (AttachNode attachNode in attachNodes)
 			{
 				Part targetPart = attachNode.attachedPart;
@@ -268,7 +286,7 @@ namespace HeatPumps
 			}
 			if (part.srfAttachNode.attachedPart != null)
 				ProcessCooling(part.srfAttachNode.attachedPart);
-			heatTransferDisplay = FormatFlux (part.thermalInternalFlux);
+			heatTransferDisplay = FormatFlux (part.thermalInternalFlux) + "x" + radiatorCount.ToString ();
 			part.skinTemperature += (part.thermalInternalFlux * part.skinThermalMassRecip * TimeWarp.fixedDeltaTime);
 			// TODO Kludgy way to see how much heat is being processed. Will fix it properly later
 			part.thermalInternalFlux = 0.0;
@@ -276,31 +294,38 @@ namespace HeatPumps
 		
 		public void ProcessCooling(Part targetPart)
 		{
-			if (part.temperature >= part.maxTemp * radiatorMaxTempCap || part.skinTemperature >= part.skinMaxTemp * radiatorMaxTempCap)
-				return;
-
 			double requested = 0d;
 			double efficiency = 1d;
 			double _heatTransfer = heatTransfer;
 			double conductionCompensation = 0d;
+			double skinToInternalFlux = targetPart.skinToInternalFlux * (targetPart.skinTemperature - targetPart.temperature);
 
-			if (legacy)
-				_heatTransfer *= (targetPart.temperature) / (targetPart.temperature + 27);
+			// TODO handle this better
+			_heatTransfer = Math.Max(heatTransfer * (targetPart.temperature / (targetPart.maxTemp * targetPart.radiatorMax)), heatTransferCap);
 
-			if (targetPart.thermalConductionFlux + targetPart.skinToInternalFlux > 0.0)
-				conductionCompensation  = (targetPart.thermalConductionFlux + targetPart.skinToInternalFlux);
+			if (targetPart.thermalConductionFlux + skinToInternalFlux > 0.0)
+				conductionCompensation  = (targetPart.thermalConductionFlux + skinToInternalFlux);
 
+			// Only counting radiators placed symmetrically for this to ensure that only heat pumps targeting the same parts are counted.
+			conductionCompensation /= radiatorCount;
+
+			// Throttle back if part is getting too hot.
+			if (part.temperature >= capTemp || part.skinTemperature >= skinCapTemp)
+				conductionCompensation *= Math.Max (capTemp / part.temperature, skinCapTemp / part.skinTemperature);
+			
 			foreach (ResourceRate resource in resources)
 			{
 				if(resource.rate > 0)
 				{
-					requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / PhysicsGlobals.ConductionFactor); // Because it gets WAY too expensive compensating for inflated conduction factors.
+					// Because it gets WAY too expensive compensating for inflated conduction factors.
+					requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / PhysicsGlobals.ConductionFactor);
 					requested *= TimeWarp.fixedDeltaTime;
 					double available = part.RequestResource(resource.id, requested);
 					if(efficiency > available / requested)
 						efficiency = available / requested;
 				}
 			}
+			part.skinToInternalFlux -= part.skinToInternalFlux * efficiency;
 			efficiencyDisplay = (efficiency).ToString ("P");
 
 			// Uses KSP 1.0 InternalHeatFlux now

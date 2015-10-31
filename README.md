@@ -5,6 +5,6 @@ Pumps can be configured with the following features.
 * A flat amount of heat removed from protected parts (active refrigeration)
 * An additional amount equal to the amount of heat conducting from adjacent parts and from the skin.
 * Resource cost per kilowatt of heat removed.
-* flat rate refrigeration can be set to scale as the original heat pump did, gradually becoming less effective as temperature drops to the point required for hydrogen to remain liquid. (legacy = true)
+* flat rate refrigeration can be set to scale as the original heat pump did, gradually becoming less effective as temperature drops to the point required for hydrogen to remain liquid.
 
 Currently, the only part is the zzz radiator (licensed by GingerCorp)

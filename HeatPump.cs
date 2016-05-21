@@ -8,7 +8,7 @@ using KSP;
 
 namespace HeatPumps
 {
-	public class ModuleHeatPump: PartModule
+	public class ModuleHeatPump: PartModule//, IAnalyticPreview, IAnalyticTemperatureModifier
 	{
 		public class ResourceRate
 		{
@@ -287,9 +287,6 @@ namespace HeatPumps
 			if (part.srfAttachNode.attachedPart != null)
 				ProcessCooling(part.srfAttachNode.attachedPart);
 			heatTransferDisplay = FormatFlux (part.thermalInternalFlux) + "x" + radiatorCount.ToString ();
-			part.skinTemperature += (part.thermalInternalFlux * part.skinThermalMassRecip * TimeWarp.fixedDeltaTime);
-			// TODO Kludgy way to see how much heat is being processed. Will fix it properly later
-			part.thermalInternalFlux = 0.0;
 		}
 		
 		public void ProcessCooling(Part targetPart)
@@ -318,7 +315,7 @@ namespace HeatPumps
 				if(resource.rate > 0)
 				{
 					// Because it gets WAY too expensive compensating for inflated conduction factors.
-					requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / PhysicsGlobals.ConductionFactor);
+                    requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / (PhysicsGlobals.ConductionFactor * PhysicsGlobals.SkinInternalConductionFactor));
 					requested *= TimeWarp.fixedDeltaTime;
 					double available = part.RequestResource(resource.id, requested);
 					if(efficiency > available / requested)
@@ -329,12 +326,39 @@ namespace HeatPumps
 			efficiencyDisplay = (efficiency).ToString ("P");
 
 			// Uses KSP 1.0 InternalHeatFlux now
-			targetPart.AddThermalFlux(-(_heatTransfer + conductionCompensation) * efficiency);
-			part.AddThermalFlux ((_heatTransfer + conductionCompensation) * efficiency);
+            targetPart.AddThermalFlux(-(_heatTransfer + conductionCompensation) * efficiency);
+			part.AddSkinThermalFlux ((_heatTransfer + conductionCompensation) * efficiency);
 		}
+
 		static void print(string msg)
 		{
 			MonoBehaviour.print("[HeatPump] " + msg);
 		}
+		/*
+		// Analytic Interface
+		public void SetAnalyticTemperature(double analyticTemp, double toBeInternal, double toBeSkin)
+		{
+		}
+
+		public double GetSkinTemperature()
+		{
+		}
+
+		public double GetInternalTemperature()
+		{
+		}
+		*/
+
+		// Analytic Preview Interface
+        /*
+        public void AnalyticInfo(double sunAndBodyIn, double backgroundRadiation, double radArea, double internalFlux, double convCoeff, double ambientTemp)
+		{
+		}
+
+		public double InternalFluxAdjust()
+		{
+			//return previewInternalFluxAdjust;
+		}
+        */      
 	}
 }

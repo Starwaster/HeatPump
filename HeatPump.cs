@@ -274,7 +274,7 @@ namespace HeatPumps
 				heatTransferDisplay = "0 W";
 				return;
 			}
-			print("FixedUpdate() Time - " + Time.time.ToString("F4") + " / " + TimeWarp.fixedDeltaTime.ToString("F4"));
+			//print("FixedUpdate() Time - " + Time.time.ToString("F4") + " / " + TimeWarp.fixedDeltaTime.ToString("F4"));
 			foreach (AttachNode attachNode in attachNodes)
 			{
 				Part targetPart = attachNode.attachedPart;
@@ -293,15 +293,18 @@ namespace HeatPumps
 		{
 			double requested = 0d;
 			double efficiency = 1d;
-			double _heatTransfer = heatTransfer;
+			double _heatTransfer = 0d;
 			double conductionCompensation = 0d;
-			double skinToInternalFlux = targetPart.skinToInternalFlux * (targetPart.skinTemperature - targetPart.temperature);
 
-			// TODO handle this better
-			_heatTransfer = Math.Max(heatTransfer * (targetPart.temperature / (targetPart.maxTemp * targetPart.radiatorMax)), heatTransferCap);
+            double tempDelta = targetPart.temperature - (targetPart.maxTemp * targetPart.radiatorMax);
 
-			if (targetPart.thermalConductionFlux + skinToInternalFlux > 0.0)
-				conductionCompensation  = (targetPart.thermalConductionFlux + skinToInternalFlux);
+            if(tempDelta > 0d)
+                _heatTransfer = Math.Max(heatTransfer * tempDelta, heatTransferCap * radiatorCount);
+
+            if (targetPart.thermalConductionFlux > 0.0)
+				conductionCompensation  += (targetPart.thermalConductionFlux);
+            if (targetPart.skinToInternalFlux > 0.0)
+                conductionCompensation  += (targetPart.skinToInternalFlux);
 
 			// Only counting radiators placed symmetrically for this to ensure that only heat pumps targeting the same parts are counted.
 			conductionCompensation /= radiatorCount;
@@ -315,7 +318,7 @@ namespace HeatPumps
 				if(resource.rate > 0)
 				{
 					// Because it gets WAY too expensive compensating for inflated conduction factors.
-                    requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / (PhysicsGlobals.ConductionFactor * PhysicsGlobals.SkinInternalConductionFactor));
+                    requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / (PhysicsGlobals.ConductionFactor));
 					requested *= TimeWarp.fixedDeltaTime;
 					double available = part.RequestResource(resource.id, requested);
 					if(efficiency > available / requested)

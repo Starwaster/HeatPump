@@ -198,8 +198,8 @@ namespace HeatPumps
 				if (c.HasValue("name"))
 				{
 					string nodeName = c.GetValue("name");
-					print("adding " + nodeName);
 					attachNodeNames.Add(nodeName);
+                    print ("Adding HEATPUMP_NODE " + nodeName);
 				}
 				
 			}

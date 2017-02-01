@@ -12,21 +12,46 @@ namespace HeatPumps
 	{
 		public class ResourceRate
 		{
-			public string name;
-			public string unitName;
-			public double rate;
+            protected string _name;
+			protected string _unitName;
+			protected double _rate;
 			public int id
 			{
 				get 
 				{
-					return name.GetHashCode ();
+					return _name.GetHashCode ();
 				}
 			}
+
+            public string name
+            {
+                get
+                {
+                    return _name;
+                }
+            }
+
+            public string unitName
+            {
+                get
+                {
+                    return _unitName;
+                }
+            }
+
+            public double rate
+            {
+                get
+                {
+                    return _rate;
+                }
+            }
+
 			public ResourceRate(string name, double rate, string unitName)
 			{
-				this.name = name;
-				this.rate = rate;
-				this.unitName = unitName;
+				this._name = name;
+				this._rate = rate;
+				this._unitName = unitName;
 			}
 			
 		}
@@ -112,9 +137,10 @@ namespace HeatPumps
 		[KSPField()]
 		public double skinInternalConductionMult = 0.001;
 		
-		public List<ResourceRate> resources;
-		
-		public List<AttachNode> attachNodes = new List<AttachNode>();
+		public List<ResourceRate> inputResources;
+        public List<ResourceRate> outputResources;
+
+        public List<AttachNode> attachNodes = new List<AttachNode>();
 		public List<string> attachNodeNames = new List<string>();
 
 		private ModuleDeployableRadiator moduleDeployableRadiator;
@@ -127,7 +153,7 @@ namespace HeatPumps
 			get
 			{
 				if((object)moduleDeployableRadiator != null)
-					return moduleDeployableRadiator.panelState == ModuleDeployableRadiator.panelStates.EXTENDED;
+                    return moduleDeployableRadiator.deployState == ModuleDeployableRadiator.DeployState.EXTENDED;
 				else
 					return isActive;
 			}
@@ -152,7 +178,7 @@ namespace HeatPumps
 		{
 			string s;
 			s = "Heat Pump: " + heatTransfer + " kW\nRequirements:\n";
-			foreach (ResourceRate resource in resources)
+			foreach (ResourceRate resource in inputResources)
 			{
 				double _rate = resource.rate * heatTransfer;
 				if(_rate > 1)
@@ -169,7 +195,8 @@ namespace HeatPumps
 		public override void OnAwake ()
 		{
 			base.OnAwake ();
-			resources = new List<ResourceRate> ();
+			inputResources = new List<ResourceRate> ();
+            outputResources = new List<ResourceRate> ();
 			attachNodes = new List<AttachNode>();
 		}
 		
@@ -188,11 +215,27 @@ namespace HeatPumps
 						unitName = n.GetValue("name");
 					double.TryParse (n.GetValue ("rate"), out rate);
 
-					resources.Add (new ResourceRate(n.GetValue("name"), rate, unitName));
+					inputResources.Add (new ResourceRate(n.GetValue("name"), rate, unitName));
 					print ("adding RESOURCE " + n.GetValue("name") + " = " + rate.ToString());
 				}
 			}
-			foreach (ConfigNode c in node.GetNodes("HEATPUMP_NODE"))
+
+            foreach (ConfigNode n in node.GetNodes ("OUTPUT_RESOURCE")) {
+                if (n.HasValue ("name") && n.HasValue ("rate")) {
+                    double rate;
+                    string unitName = "";
+                    if (n.HasValue ("unitName"))
+                        unitName = n.GetValue ("unitName");
+                    else
+                        unitName = n.GetValue ("name");
+                    double.TryParse (n.GetValue ("rate"), out rate);
+
+                    outputResources.Add (new ResourceRate (n.GetValue ("name"), rate, unitName));
+                    print ("adding OUTPUT_RESOURCE " + n.GetValue ("name") + " = " + rate.ToString ());
+                }
+            }
+
+            foreach (ConfigNode c in node.GetNodes("HEATPUMP_NODE"))
 			{
 				print("searching HEATPUMP_NODE");
 				if (c.HasValue("name"))
@@ -231,15 +274,18 @@ namespace HeatPumps
 				Actions["ActivateAction"].active = false;
 				Actions["ShutdownAction"].active = false;
 			}
-			if(resources.Count == 0 && part.partInfo != null) 
+			if(inputResources.Count == 0 && part.partInfo != null) 
 			{
-				resources = ((ModuleHeatPump) part.partInfo.partPrefab.Modules["ModuleHeatPump"]).resources;
+				inputResources = ((ModuleHeatPump) part.partInfo.partPrefab.Modules["ModuleHeatPump"]).inputResources;
 			}
-			if (attachNodes.Count == 0)
+            if (outputResources.Count == 0 && part.partInfo != null) {
+                outputResources = ((ModuleHeatPump)part.partInfo.partPrefab.Modules ["ModuleHeatPump"]).outputResources;
+            }
+            if (attachNodes.Count == 0)
 			{
 				foreach (string nodeName in attachNodeNames)
 				{
-					AttachNode node = part.findAttachNode(nodeName);
+					AttachNode node = part.FindAttachNode (nodeName);
 					if ((object)node != null)
 					{
 						print ("Found AttachNode: " + nodeName);
@@ -274,7 +320,8 @@ namespace HeatPumps
 				heatTransferDisplay = "0 W";
 				return;
 			}
-			//print("FixedUpdate() Time - " + Time.time.ToString("F4") + " / " + TimeWarp.fixedDeltaTime.ToString("F4"));
+            //print("FixedUpdate() Time - " + Time.time.ToString("F4") + " / " + TimeWarp.fixedDeltaTime.ToString("F4"));
+            double startingSkinFlux = part.thermalSkinFlux;
 			foreach (AttachNode attachNode in attachNodes)
 			{
 				Part targetPart = attachNode.attachedPart;
@@ -286,7 +333,7 @@ namespace HeatPumps
 			}
 			if (part.srfAttachNode.attachedPart != null)
 				ProcessCooling(part.srfAttachNode.attachedPart);
-			heatTransferDisplay = FormatFlux (part.thermalInternalFlux) + "x" + radiatorCount.ToString ();
+            heatTransferDisplay = FormatFlux (part.thermalSkinFlux - startingSkinFlux) + "x" + radiatorCount.ToString ();
 		}
 		
 		public void ProcessCooling(Part targetPart)
@@ -313,7 +360,7 @@ namespace HeatPumps
 			if (part.temperature >= capTemp || part.skinTemperature >= skinCapTemp)
 				conductionCompensation *= Math.Max (capTemp / part.temperature, skinCapTemp / part.skinTemperature);
 			
-			foreach (ResourceRate resource in resources)
+			foreach (ResourceRate resource in inputResources)
 			{
 				if(resource.rate > 0)
 				{
@@ -331,7 +378,17 @@ namespace HeatPumps
 			// Uses KSP 1.0 InternalHeatFlux now
             targetPart.AddThermalFlux(-(_heatTransfer + conductionCompensation) * efficiency);
 			part.AddSkinThermalFlux ((_heatTransfer + conductionCompensation) * efficiency);
-		}
+      
+            foreach (ResourceRate resource in outputResources)
+            {
+                if (resource.rate > 0)
+                {
+                    requested = (resource.rate * _heatTransfer);
+                    requested *= TimeWarp.fixedDeltaTime;
+                    part.RequestResource (resource.id, -requested);
+                }
+            }
+        }
 
 		static void print(string msg)
 		{

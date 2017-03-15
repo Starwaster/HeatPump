@@ -198,6 +198,7 @@ namespace HeatPumps
 			inputResources = new List<ResourceRate> ();
             outputResources = new List<ResourceRate> ();
 			attachNodes = new List<AttachNode>();
+            heatTransferCap = Math.Max(heatTransferCap, heatTransfer); // should never be less than heatTransfer
 		}
 		
 		public override void OnLoad (ConfigNode node)
@@ -333,7 +334,6 @@ namespace HeatPumps
 			}
 			if (part.srfAttachNode.attachedPart != null)
 				ProcessCooling(part.srfAttachNode.attachedPart);
-            heatTransferDisplay = FormatFlux (part.thermalSkinFlux - startingSkinFlux) + "x" + radiatorCount.ToString ();
 		}
 		
 		public void ProcessCooling(Part targetPart)
@@ -346,7 +346,12 @@ namespace HeatPumps
             double tempDelta = targetPart.temperature - (targetPart.maxTemp * targetPart.radiatorMax);
 
             if(tempDelta > 0d)
-                _heatTransfer = Math.Max(heatTransfer * tempDelta, heatTransferCap * radiatorCount);
+                _heatTransfer = Math.Min(Math.Min(heatTransfer * tempDelta, heatTransfer), heatTransferCap);
+
+            // Throttle back if part is getting too hot.
+            if (part.temperature >= capTemp || part.skinTemperature >= skinCapTemp)
+                //conductionCompensation *= Math.Min (capTemp / part.temperature, skinCapTemp / part.skinTemperature);
+                return;
 
             if (targetPart.thermalConductionFlux > 0.0)
 				conductionCompensation  += (targetPart.thermalConductionFlux);
@@ -356,15 +361,11 @@ namespace HeatPumps
 			// Only counting radiators placed symmetrically for this to ensure that only heat pumps targeting the same parts are counted.
 			conductionCompensation /= radiatorCount;
 
-			// Throttle back if part is getting too hot.
-			if (part.temperature >= capTemp || part.skinTemperature >= skinCapTemp)
-				conductionCompensation *= Math.Max (capTemp / part.temperature, skinCapTemp / part.skinTemperature);
-			
 			foreach (ResourceRate resource in inputResources)
 			{
 				if(resource.rate > 0)
 				{
-					// Because it gets WAY too expensive compensating for inflated conduction factors.
+					// Divided by PG.ConductionFactor because it gets WAY too expensive compensating for inflated conduction factors.
                     requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / (PhysicsGlobals.ConductionFactor));
 					requested *= TimeWarp.fixedDeltaTime;
 					double available = part.RequestResource(resource.id, requested);
@@ -372,12 +373,13 @@ namespace HeatPumps
 						efficiency = available / requested;
 				}
 			}
-			part.skinToInternalFlux -= part.skinToInternalFlux * efficiency;
+            // Was doing this for display purposes but not sure it's a good idea...
+            //part.skinToInternalFlux -= (_heatTransfer + conductionCompensation) * efficiency;
 			efficiencyDisplay = (efficiency).ToString ("P");
-
-			// Uses KSP 1.0 InternalHeatFlux now
+            heatTransferDisplay = FormatFlux((_heatTransfer + conductionCompensation) * efficiency) + "x" + radiatorCount.ToString();
+			
             targetPart.AddThermalFlux(-(_heatTransfer + conductionCompensation) * efficiency);
-			part.AddSkinThermalFlux ((_heatTransfer + conductionCompensation) * efficiency);
+            part.AddSkinThermalFlux ((_heatTransfer + conductionCompensation) * efficiency / PhysicsGlobals.ConductionFactor);
       
             foreach (ResourceRate resource in outputResources)
             {

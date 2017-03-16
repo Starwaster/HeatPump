@@ -1,4 +1,4 @@
-HeatPump from RealFuels, updated for KSP 1.0.4
+HeatPump from RealFuels, updated for KSP 1.2.2
 
 The purpose of Heat Pump is to cool down cryogenic tanks and prevent (or retard) boiloff.
 Pumps can be configured with the following features.

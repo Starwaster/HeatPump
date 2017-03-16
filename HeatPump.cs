@@ -309,8 +309,8 @@ namespace HeatPumps
 
 		public void OnVesselWasModified(Vessel v)
 		{
-			if (v == part.vessel)
-				radiatorCount = part.symmetryCounterparts.Count + 1;
+			//if (v == part.vessel)
+			//	radiatorCount = part.symmetryCounterparts.Count + 1;
 		}
 		
 		void FixedUpdate()
@@ -321,8 +321,15 @@ namespace HeatPumps
 				heatTransferDisplay = "0 W";
 				return;
 			}
-            //print("FixedUpdate() Time - " + Time.time.ToString("F4") + " / " + TimeWarp.fixedDeltaTime.ToString("F4"));
-            double startingSkinFlux = part.thermalSkinFlux;
+
+            radiatorCount = 1;
+            foreach (Part p in part.symmetryCounterparts)
+            {
+                ModuleHeatPump hp = p.Modules["ModuleHeatPump"] as ModuleHeatPump;
+                if (hp.isActive)
+                    radiatorCount += 1;
+            }
+
 			foreach (AttachNode attachNode in attachNodes)
 			{
 				Part targetPart = attachNode.attachedPart;

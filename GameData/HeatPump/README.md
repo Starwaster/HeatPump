@@ -8,5 +8,5 @@ Pumps can be configured with the following features.
 * Resource cost per kilowatt of heat removed.
 * The amount of heat moved into the radiator is split up among any symmetrically added radiators.
 
-This mod comes with a radiator part created by zzz (licensed by GingerCorp)
+This mod comes with a radiator part created by zzz (licensed by GingerCorp).
 Heat Pump versions of all stock radiators are also included.

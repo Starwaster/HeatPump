@@ -8,7 +8,7 @@
     <RootNamespace>HeatPump</RootNamespace>
     <AssemblyName>HeatPump</AssemblyName>
     <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
-    <ReleaseVersion>1.2.2</ReleaseVersion>
+    <ReleaseVersion>1.3.0</ReleaseVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>True</DebugSymbols>

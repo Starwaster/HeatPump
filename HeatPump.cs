@@ -326,7 +326,7 @@ namespace HeatPumps
             foreach (Part p in part.symmetryCounterparts)
             {
                 ModuleHeatPump hp = p.Modules["ModuleHeatPump"] as ModuleHeatPump;
-                if (hp.isActive)
+                if (hp.IsActive)
                     radiatorCount += 1;
             }
 

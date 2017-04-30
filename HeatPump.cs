@@ -8,7 +8,7 @@ using KSP;
 
 namespace HeatPumps
 {
-	public class ModuleHeatPump: PartModule//, IAnalyticPreview, IAnalyticTemperatureModifier
+	public class ModuleHeatPump: PartModule, IAnalyticPreview, IAnalyticTemperatureModifier
 	{
 		public class ResourceRate
 		{
@@ -83,7 +83,7 @@ namespace HeatPumps
 		{
 			if ((object)moduleDeployableRadiator != null)
 				return;
-			if(isActive)
+			if (isActive)
 				Shutdown ();
 			else
 				Activate ();
@@ -112,7 +112,7 @@ namespace HeatPumps
 			//Events ["Shutdown"].guiActive = false;
 			//Events ["Activate"].guiActive = true;
 		}
-		[KSPField()]
+        [KSPField(isPersistant = false)]
 		public double radiatorMaxTempCap = 0.8;
 
 		// TODO Deprecate this; would have performed function now performed by ModuleDeployableRadiator
@@ -126,15 +126,15 @@ namespace HeatPumps
 		public bool isActive = false;
 		
 		[KSPField(isPersistant = false)]
-		public double heatTransfer = 0.1;
+		public double heatTransfer = 10;
 
-		[KSPField()]
-		public double heatTransferCap = 1.0;
+        [KSPField(isPersistant = false)]
+		public double heatTransferCap = 100;
 
-		[KSPField()]
+		[KSPField(isPersistant = false)]
 		public double heatConductivity = 0.12;
 
-		[KSPField()]
+		[KSPField(isPersistant = false)]
 		public double skinInternalConductionMult = 0.001;
 		
 		public List<ResourceRate> inputResources;
@@ -148,14 +148,31 @@ namespace HeatPumps
 		private double skinCapTemp;
 		private int radiatorCount;
 
+        private double analyticInternalTemp;
+        private double analyticSkinTemp;
+        private double internalFluxAdjust;
+        private double previousAnalyticTemp;
+        private double PGConductionFactor;
+
+        public FlightIntegrator flightIntegrator
+        {
+            get { return _flightIntegrator; }
+        }
+
+        public FlightIntegrator _flightIntegrator;
+
 		public bool IsActive
 		{
 			get
 			{
-				if((object)moduleDeployableRadiator != null)
-                    return moduleDeployableRadiator.deployState == ModuleDeployableRadiator.DeployState.EXTENDED;
-				else
-					return isActive;
+                if (HighLogic.LoadedSceneIsFlight)
+                {
+                    if ((object)moduleDeployableRadiator != null)
+                        return moduleDeployableRadiator.deployState == ModuleDeployableRadiator.DeployState.EXTENDED;
+                    else
+                        return isActive;
+                }
+                return false;
 			}
 		}
 
@@ -177,18 +194,20 @@ namespace HeatPumps
 		public override string GetInfo ()
 		{
 			string s;
-			s = "Heat Pump: " + heatTransfer + " kW\nRequirements:\n";
+			s = "Heat Pump: " + heatTransfer + " kW\n<color=#ff9900ff>- Requires:</color>\n";
 			foreach (ResourceRate resource in inputResources)
 			{
 				double _rate = resource.rate * heatTransfer;
-				if(_rate > 1)
+				if (_rate > 1)
 					s += "  " + resource.name + ": " + _rate.ToString ("F2") + " " + resource.unitName + "/s\n";
-				else if(_rate > 0.01666667f)
+				else if (_rate > 0.01666667f)
 					s += "  " + resource.name + ": " + (_rate * 60).ToString ("F2") + " " + resource.unitName + "/m\n";
 				else
-					s += "  " + resource.name + ": " + (_rate * 3600).ToString ("F2") + " " + resource.unitName + "/h\n";
+					s += "  " + resource.name + ": " + (_rate * 3600).ToString ("F2") + " " + resource.unitName + "/h\n\n";
 			}
-			
+
+            s += " Extra insulation resistance value: " + skinInternalConductionMult.ToString();
+
 			return s;
 		}
 		
@@ -206,7 +225,7 @@ namespace HeatPumps
 			base.OnLoad (node);
 			foreach (ConfigNode n in node.GetNodes ("RESOURCE")) 
 			{
-				if(n.HasValue ("name") && n.HasValue ("rate")) 
+				if (n.HasValue ("name") && n.HasValue ("rate")) 
 				{
 					double rate;
 					string unitName = "";
@@ -257,9 +276,6 @@ namespace HeatPumps
 			skinCapTemp = part.skinMaxTemp * radiatorMaxTempCap;
 			capTemp = part.maxTemp * radiatorMaxTempCap;
 
-			moduleDeployableRadiator = part.FindModuleImplementing<ModuleDeployableRadiator> ();
-			radiatorCount = part.symmetryCounterparts.Count + 1;
-
 			GameEvents.onVesselWasModified.Add (OnVesselWasModified);
 
 			if ((object)moduleDeployableRadiator == null)
@@ -275,7 +291,7 @@ namespace HeatPumps
 				Actions["ActivateAction"].active = false;
 				Actions["ShutdownAction"].active = false;
 			}
-			if(inputResources.Count == 0 && part.partInfo != null) 
+			if (inputResources.Count == 0 && part.partInfo != null) 
 			{
 				inputResources = ((ModuleHeatPump) part.partInfo.partPrefab.Modules["ModuleHeatPump"]).inputResources;
 			}
@@ -305,7 +321,21 @@ namespace HeatPumps
 				part.srfAttachNode.attachedPart.heatConductivity = Math.Min (heatConductivity, part.srfAttachNode.attachedPart.heatConductivity);
 				part.srfAttachNode.attachedPart.skinInternalConductionMult = Math.Min (skinInternalConductionMult, part.srfAttachNode.attachedPart.skinInternalConductionMult);	
 			}
-		}
+
+            if (HighLogic.LoadedSceneIsFlight)
+            {
+                for (int i = 0; i < vessel.vesselModules.Count; i++)
+                {
+                    if (vessel.vesselModules[i] is FlightIntegrator)
+                    {
+                        _flightIntegrator = vessel.vesselModules[i] as FlightIntegrator;
+                    }
+                }
+
+                moduleDeployableRadiator = part.FindModuleImplementing<ModuleDeployableRadiator>();
+                radiatorCount = part.symmetryCounterparts.Count + 1;
+            }
+        }
 
 		public void OnVesselWasModified(Vessel v)
 		{
@@ -315,12 +345,14 @@ namespace HeatPumps
 		
 		void FixedUpdate()
 		{
-			if (!HighLogic.LoadedSceneIsFlight || !IsActive)
+            if (!IsActive)
 			{
 				efficiencyDisplay = "0%";
 				heatTransferDisplay = "0 W";
 				return;
 			}
+
+            PGConductionFactor = Math.Max(1.0d, PhysicsGlobals.ConductionFactor);
 
             radiatorCount = 1;
             foreach (Part p in part.symmetryCounterparts)
@@ -330,63 +362,101 @@ namespace HeatPumps
                     radiatorCount += 1;
             }
 
-			foreach (AttachNode attachNode in attachNodes)
-			{
-				Part targetPart = attachNode.attachedPart;
-				
-				if ((object)targetPart == null)
-					continue;
-				
-				ProcessCooling(targetPart);
-			}
-			if (part.srfAttachNode.attachedPart != null)
+            if (!flightIntegrator.isAnalytical)
+            {
+                foreach (AttachNode attachNode in attachNodes)
+                {
+                    Part targetPart = attachNode.attachedPart;
+
+                    if ((object)targetPart == null)
+                        continue;
+
+                    ProcessCooling(targetPart);
+                }
+                if (part.srfAttachNode.attachedPart != null)
 				ProcessCooling(part.srfAttachNode.attachedPart);
+            }
 		}
 		
-		public void ProcessCooling(Part targetPart)
+        public void ProcessCooling(Part targetPart, bool analyticalMode = false)
 		{
+            if (!IsActive)
+                return;
 			double requested = 0d;
 			double efficiency = 1d;
 			double _heatTransfer = 0d;
 			double conductionCompensation = 0d;
 
-            double tempDelta = targetPart.temperature - (targetPart.maxTemp * targetPart.radiatorMax);
+            double tempDelta = 0d;
+            double targetTemp = targetPart.maxTemp * targetPart.radiatorMax;
+            double analyticalTemp = 0d;
 
-            if(tempDelta > 0d)
-                _heatTransfer = Math.Min(Math.Min(heatTransfer * tempDelta, heatTransfer), heatTransferCap);
+            if (!analyticalMode)
+                tempDelta = targetPart.temperature - targetTemp;
+            else
+            {
+                analyticalTemp = (previousAnalyticTemp + analyticInternalTemp)/2;
+                tempDelta = Math.Max(part.temperature, analyticalTemp) - targetTemp;
+                previousAnalyticTemp = analyticInternalTemp;
+            }
+
+            if (tempDelta > 0d)
+            {
+                // Never drop below the heatTransfer value; fractional values makes it harder to reach our temperature goals
+                _heatTransfer = Math.Max(heatTransfer * tempDelta, heatTransfer);
+                _heatTransfer = Math.Min(heatTransfer, heatTransferCap);
+            }
 
             // Throttle back if part is getting too hot.
-            if (part.temperature >= capTemp || part.skinTemperature >= skinCapTemp)
+            if (Math.Max(part.temperature, analyticInternalTemp) >= capTemp || Math.Max(part.skinTemperature, analyticSkinTemp) >= skinCapTemp)
                 //conductionCompensation *= Math.Min (capTemp / part.temperature, skinCapTemp / part.skinTemperature);
                 return;
-
-            if (targetPart.thermalConductionFlux > 0.0)
-				conductionCompensation  += (targetPart.thermalConductionFlux);
-            if (targetPart.skinToInternalFlux > 0.0)
-                conductionCompensation  += (targetPart.skinToInternalFlux);
+            if (!analyticalMode)
+            {
+                if (targetPart.thermalConductionFlux > 0.0)
+                    conductionCompensation += (targetPart.thermalConductionFlux);
+                if (targetPart.skinToInternalFlux > 0.0)
+                    conductionCompensation += (targetPart.skinToInternalFlux);
+            }
+            else
+            {
+                // Analytical mode means we don't have conduction information available. Improvise.
+                //conductionCompensation = Math.Pow(tempDelta, 4d);
+                conductionCompensation = tempDelta;
+                // example:
+                // tempDelta = 1 (degree Kelvin)
+                // thermal mass = 1000 
+                // so flux = -1000 kw? that's not right....
+            }
 
 			// Only counting radiators placed symmetrically for this to ensure that only heat pumps targeting the same parts are counted.
 			conductionCompensation /= radiatorCount;
 
-			foreach (ResourceRate resource in inputResources)
-			{
-				if(resource.rate > 0)
-				{
-					// Divided by PG.ConductionFactor because it gets WAY too expensive compensating for inflated conduction factors.
-                    requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / (PhysicsGlobals.ConductionFactor));
-					requested *= TimeWarp.fixedDeltaTime;
-					double available = part.RequestResource(resource.id, requested);
-					if(efficiency > available / requested)
-						efficiency = available / requested;
-				}
-			}
-            // Was doing this for display purposes but not sure it's a good idea...
-            //part.skinToInternalFlux -= (_heatTransfer + conductionCompensation) * efficiency;
-			efficiencyDisplay = (efficiency).ToString ("P");
+            // Temporarily ceasing resource consumption during analytical mode pending evaluation of cooling rate.
+            // TODO: Investigate reinstatement of resource consumption during analytical mode.
+            if (!analyticalMode)
+            {
+                foreach (ResourceRate resource in inputResources)
+                {
+                    double availableResources = 0;
+                    if (resource.rate > 0)
+                    {
+                        // Divided by PG.ConductionFactor because it gets WAY too expensive compensating for inflated conduction factors.
+                        requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / PGConductionFactor);
+
+                        requested *= TimeWarp.fixedDeltaTime;
+                        availableResources = part.RequestResource(resource.id, requested);
+                        if (efficiency > availableResources / requested)
+						efficiency = availableResources / requested;
+                    }
+                }
+            }
+
+            efficiencyDisplay = (efficiency).ToString ("P");
             heatTransferDisplay = FormatFlux((_heatTransfer + conductionCompensation) * efficiency) + "x" + radiatorCount.ToString();
 			
-            targetPart.AddThermalFlux(-(_heatTransfer + conductionCompensation) * efficiency);
-            part.AddSkinThermalFlux ((_heatTransfer + conductionCompensation) * efficiency / PhysicsGlobals.ConductionFactor);
+            targetPart.AddThermalFlux(-(_heatTransfer + conductionCompensation) * efficiency * 2.0);
+            part.AddSkinThermalFlux ((_heatTransfer + conductionCompensation) * efficiency * 2.0 / PGConductionFactor);
       
             foreach (ResourceRate resource in outputResources)
             {
@@ -403,31 +473,57 @@ namespace HeatPumps
 		{
 			MonoBehaviour.print("[HeatPump] " + msg);
 		}
-		/*
-		// Analytic Interface
-		public void SetAnalyticTemperature(double analyticTemp, double toBeInternal, double toBeSkin)
-		{
-		}
 
-		public double GetSkinTemperature()
-		{
-		}
+        #region Analytic Interfaces
+        // Analytic Interface
+        public void SetAnalyticTemperature(FlightIntegrator fi, double analyticTemp, double toBeInternal, double toBeSkin)
+        {
+            analyticSkinTemp = toBeSkin;
+            analyticInternalTemp = toBeInternal;
+        }
 
-		public double GetInternalTemperature()
-		{
-		}
-		*/
+        public double GetSkinTemperature(out bool lerp)
+        {
+            lerp = true;
+            return analyticSkinTemp;
+        }
 
-		// Analytic Preview Interface
-        /*
-        public void AnalyticInfo(double sunAndBodyIn, double backgroundRadiation, double radArea, double internalFlux, double convCoeff, double ambientTemp)
-		{
-		}
+        public double GetInternalTemperature(out bool lerp)
+        {
+            lerp = true;
+            return analyticInternalTemp;
+        }
 
-		public double InternalFluxAdjust()
-		{
-			//return previewInternalFluxAdjust;
-		}
-        */      
-	}
+        // Analytic Preview Interface
+        public void AnalyticInfo(FlightIntegrator fi, double sunAndBodyIn, double backgroundRadiation, double radArea, double absEmissRatio, double internalFlux, double convCoeff, double ambientTemp, double maxPartTemp)
+        {
+            if (_flightIntegrator != fi)
+                _flightIntegrator = fi;
+
+            //analyticalInternalFlux = internalFlux;
+            //float deltaTime = (float)(Planetarium.GetUniversalTime() - vessel.lastUT);
+            if (IsActive)
+            {
+                //Debug.Log("[ModuleHeatPump] UT = " + Planetarium.GetUniversalTime().ToString() + ", internalFlux = " + internalFlux.ToString());
+                foreach (AttachNode attachNode in attachNodes)
+                {
+                    Part targetPart = attachNode.attachedPart;
+
+                    if ((object)targetPart == null)
+                        continue;
+
+                    ProcessCooling(targetPart, true);
+                }
+                if (part.srfAttachNode.attachedPart != null)
+                    ProcessCooling(part.srfAttachNode.attachedPart, true);
+            }
+        }
+
+        public double InternalFluxAdjust()
+        {
+            return internalFluxAdjust;
+        }
+
+        #endregion
+    }
 }

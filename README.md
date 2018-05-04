@@ -10,3 +10,7 @@ Pumps can be configured with the following features.
 
 This mod comes with a radiator part created by zzz (licensed by GingerCorp)
 Heat Pump versions of all stock radiators are also included.
+
+Some notes on efficiency:
+Hubble installed with 7W cooling at 70K for a cost of 300 W of electricity
+Mars MTV expects to cool 78W at a cost of 8.892 kW (114W / W removed)

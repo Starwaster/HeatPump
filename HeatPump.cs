@@ -14,7 +14,8 @@ namespace HeatPumps
 		{
             protected string _name;
 			protected string _unitName;
-			protected double _rate;
+            protected FloatCurve _rate;
+
 			public int id
 			{
 				get 
@@ -39,7 +40,7 @@ namespace HeatPumps
                 }
             }
 
-            public double rate
+            public FloatCurve rate
             {
                 get
                 {
@@ -47,7 +48,7 @@ namespace HeatPumps
                 }
             }
 
-			public ResourceRate(string name, double rate, string unitName)
+            public ResourceRate(string name, FloatCurve rate, string unitName)
 			{
 				this._name = name;
 				this._rate = rate;
@@ -194,10 +195,10 @@ namespace HeatPumps
 		public override string GetInfo ()
 		{
 			string s;
-			s = "Heat Pump: " + heatTransfer + " kW\n<color=#ff9900ff>- Requires:</color>\n";
+			s = "Heat Pump: " + heatTransfer + " kW\n<color=#ff9900ff>- Requires up to:</color>\n";
 			foreach (ResourceRate resource in inputResources)
 			{
-				double _rate = resource.rate * heatTransfer;
+                double _rate = resource.rate.Evaluate(20.15f) * heatTransfer;
 				if (_rate > 1)
 					s += "  " + resource.name + ": " + _rate.ToString ("F2") + " " + resource.unitName + "/s\n";
 				else if (_rate > 0.01666667f)
@@ -225,30 +226,32 @@ namespace HeatPumps
 			base.OnLoad (node);
 			foreach (ConfigNode n in node.GetNodes ("RESOURCE")) 
 			{
-				if (n.HasValue ("name") && n.HasValue ("rate")) 
+                if (n.HasValue ("name") && n.HasNode ("rate")) 
 				{
-					double rate;
+                    FloatCurve rate = new FloatCurve();
 					string unitName = "";
 					if (n.HasValue ("unitName"))
 						unitName = n.GetValue ("unitName");
 					else
 						unitName = n.GetValue("name");
-					double.TryParse (n.GetValue ("rate"), out rate);
+                    rate.Load(n.GetNode("rate"));
 
 					inputResources.Add (new ResourceRate(n.GetValue("name"), rate, unitName));
 					print ("adding RESOURCE " + n.GetValue("name") + " = " + rate.ToString());
 				}
 			}
 
-            foreach (ConfigNode n in node.GetNodes ("OUTPUT_RESOURCE")) {
-                if (n.HasValue ("name") && n.HasValue ("rate")) {
-                    double rate;
+            foreach (ConfigNode n in node.GetNodes ("OUTPUT_RESOURCE"))
+            {
+                if (n.HasValue ("name") && n.HasNode ("rate"))
+                {
+                    FloatCurve rate = new FloatCurve();
                     string unitName = "";
                     if (n.HasValue ("unitName"))
                         unitName = n.GetValue ("unitName");
                     else
                         unitName = n.GetValue ("name");
-                    double.TryParse (n.GetValue ("rate"), out rate);
+                    rate.Load(n.GetNode("rate"));
 
                     outputResources.Add (new ResourceRate (n.GetValue ("name"), rate, unitName));
                     print ("adding OUTPUT_RESOURCE " + n.GetValue ("name") + " = " + rate.ToString ());
@@ -389,8 +392,8 @@ namespace HeatPumps
 
             double tempDelta = 0d;
             double targetTemp = targetPart.maxTemp * targetPart.radiatorMax;
-            double analyticalTemp = 0d;
 
+            /*
             if (!analyticalMode)
                 tempDelta = targetPart.temperature - targetTemp;
             else
@@ -399,12 +402,15 @@ namespace HeatPumps
                 tempDelta = Math.Max(part.temperature, analyticalTemp) - targetTemp;
                 previousAnalyticTemp = analyticInternalTemp;
             }
+            */
+
+            tempDelta = targetPart.temperature - targetTemp;
 
             if (tempDelta > 0d)
             {
                 // Never drop below the heatTransfer value; fractional values makes it harder to reach our temperature goals
                 _heatTransfer = Math.Max(heatTransfer * tempDelta, heatTransfer);
-                _heatTransfer = Math.Min(heatTransfer, heatTransferCap);
+                _heatTransfer = Math.Min(_heatTransfer, heatTransferCap);
             }
 
             // Throttle back if part is getting too hot.
@@ -422,11 +428,7 @@ namespace HeatPumps
             {
                 // Analytical mode means we don't have conduction information available. Improvise.
                 //conductionCompensation = Math.Pow(tempDelta, 4d);
-                conductionCompensation = tempDelta;
-                // example:
-                // tempDelta = 1 (degree Kelvin)
-                // thermal mass = 1000 
-                // so flux = -1000 kw? that's not right....
+                //conductionCompensation = Math.Max(tempDelta, 0) * targetPart.thermalMass;
             }
 
 			// Only counting radiators placed symmetrically for this to ensure that only heat pumps targeting the same parts are counted.
@@ -439,10 +441,11 @@ namespace HeatPumps
                 foreach (ResourceRate resource in inputResources)
                 {
                     double availableResources = 0;
-                    if (resource.rate > 0)
+                    double rate = resource.rate.Evaluate((float)targetPart.temperature);
+                    if (rate > 0 && targetPart.temperature < part.temperature)
                     {
                         // Divided by PG.ConductionFactor because it gets WAY too expensive compensating for inflated conduction factors.
-                        requested = (resource.rate * _heatTransfer) + (resource.rate * conductionCompensation / PGConductionFactor);
+                        requested = (rate * _heatTransfer) + (rate * conductionCompensation);
 
                         requested *= TimeWarp.fixedDeltaTime;
                         availableResources = part.RequestResource(resource.id, requested);
@@ -452,17 +455,20 @@ namespace HeatPumps
                 }
             }
 
-            efficiencyDisplay = (efficiency).ToString ("P");
+            float cost = inputResources[0].rate.Evaluate((float)targetPart.temperature);
+            efficiencyDisplay = (efficiency).ToString ("P") + "(cost = " + cost.ToString("F2") + ")";
             heatTransferDisplay = FormatFlux((_heatTransfer + conductionCompensation) * efficiency) + "x" + radiatorCount.ToString();
 			
-            targetPart.AddThermalFlux(-(_heatTransfer + conductionCompensation) * efficiency * 2.0);
-            part.AddSkinThermalFlux ((_heatTransfer + conductionCompensation) * efficiency * 2.0 / PGConductionFactor);
+            targetPart.AddThermalFlux(-(_heatTransfer + conductionCompensation) * efficiency);
+
+            part.AddSkinThermalFlux ((_heatTransfer + conductionCompensation) * efficiency);
       
             foreach (ResourceRate resource in outputResources)
             {
-                if (resource.rate > 0)
+                double rate = resource.rate.Evaluate((float)targetPart.temperature);
+                if (rate > 0 &&  targetPart.temperature < part.temperature)
                 {
-                    requested = (resource.rate * _heatTransfer);
+                    requested = (rate * _heatTransfer);
                     requested *= TimeWarp.fixedDeltaTime;
                     part.RequestResource (resource.id, -requested);
                 }
@@ -490,7 +496,7 @@ namespace HeatPumps
 
         public double GetInternalTemperature(out bool lerp)
         {
-            lerp = true;
+            lerp = false;
             return analyticInternalTemp;
         }
 
